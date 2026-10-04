@@ -24,10 +24,10 @@ Already covered: Drive, WhatsApp/Slack, Spotify, TikTok/Instagram/Twitter feeds,
 | Priority | Problem | Why it earns a slot | Likely source |
 |---|---|---|---|
 | 1 | **Notification system** (push/SMS/email) | Fan-out, retries, dedup, user preferences, third-party providers | ByteByteGo chapter, Hello Interview |
-| 2 | **Distributed cache** (Redis-like) | Eviction, replication, consistent hashing, hot keys | Hello Interview, TechPrep playlist |
-| 3 | **Payment system** (Cash App / Stripe-style) | Idempotency, double-entry ledger, reconciliation, exactly-once effects | TechPrep, ByteByteGo |
-| 4 | **Distributed job scheduler** | Leasing, retries, at-least-once vs exactly-once, time-based triggers | Hello Interview, TechPrep |
-| 5 | **Metrics monitoring and alerting** | Time-series storage, downsampling, alert evaluation | TechPrep, ByteByteGo |
+| ✅ 2 | **Distributed cache** (Redis-like) | Eviction, replication, consistent hashing, hot keys | Hello Interview, TechPrep playlist |
+| ✅ 3 | **Payment system / wallet** (Cash App / Stripe-style) | Idempotency, double-entry ledger, reconciliation, exactly-once effects | TechPrep, ByteByteGo |
+| ✅ 4 | **Distributed job scheduler** | Leasing, retries, at-least-once vs exactly-once, time-based triggers | Hello Interview, TechPrep |
+| ✅ 5 | **Metrics monitoring and alerting** | Time-series storage, downsampling, alert evaluation | TechPrep, ByteByteGo |
 | 6 | **Proximity service** (Yelp / DoorDash) | Geohash vs quadtree, location updates over WebSockets | Gaurav Sen, ByteByteGo |
 | 7 | **Typeahead / autocomplete** | Trie vs prefix index, ranking, caching, update pipeline | ByteByteGo, Jordan |
 | 8 | **Collaborative editor** (Google Docs) | OT vs CRDT, presence, real-time updates | Hello Interview |
@@ -35,6 +35,8 @@ Already covered: Drive, WhatsApp/Slack, Spotify, TikTok/Instagram/Twitter feeds,
 | 10 | **Key-value store** (Dynamo-style) | Quorum reads/writes, gossip, vector clocks, anti-entropy | ByteByteGo |
 | 11 | Top-K / leaderboard, online auction, hotel booking, Tinder, online judge | Common variants that reuse the patterns above | Hello Interview |
 | 12 | **LLM / RAG / agent system design** | Increasingly asked; vector stores, evaluation, cost and latency | Hello Interview, ByteByteGo (AI content) |
+
+Done in entries 23-26 (TechPrep). Several of the Hello Interview pages for these problems are Premium-only, so they are linked for their public outline but not summarised.
 
 ## Technique notes to add
 

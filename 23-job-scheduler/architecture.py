@@ -1,0 +1,41 @@
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+from lanes import build
+
+lanes = [
+ {"name": "SUBMISSION PATH", "color": "#1a73e8",
+  "nodes": [("Client", "user", "actor", "POST /v1/tasks\n(payload, run time or cron)"),
+            ("API gateway", "lb", "network", "auth · rate limit"),
+            ("Task management\nservice", "run", "compute", "validate payload + cron"),
+            ("Postgres\n(sharded by tenant)", "db", "data", "task_definition, task_execution\n(state machine + version)")],
+  "edges": [(0, "submit", "Create a one-off, delayed or recurring (cron) task; also GET status, DELETE (cancel), GET executions"),
+            (1, "", "Gateway authenticates and enforces limits"),
+            (2, "persist", "Task stored as PENDING in the source of truth; only after this is it acknowledged (no data loss)")]},
+ {"name": "EXECUTION PATH  ·  push-pull time partitioning, start within 200 ms", "color": "#F29900",
+  "nodes": [("Postgres", "db", "data", "tasks due soon"),
+            ("Relay (look-ahead\nbatch)", "pipeline", "compute", "every ~5 min: load the next\n10 min of tasks"),
+            ("Redis ZSET", "bolt", "ops", "score = epoch run time;\ntime-bucketed keys, clustered"),
+            ("Scheduler nodes", "chart", "compute", "poll every 100 ms; Lua script\natomically pop due tasks"),
+            ("Per-tenant queues\n(Kafka / RabbitMQ / SQS)", "pipeline", "compute", "tenant-hash routing prevents\nnoisy neighbours"),
+            ("Workers", "run", "compute", "execute webhook / script;\nlog to Cassandra")],
+  "edges": [(0, "scan window", "A batch query, not constant polling, keeps Postgres from melting under billions of rows"),
+            (1, "stage", "Near-term task ids go into the sorted set"),
+            (2, "due ≤ now", "A sorted set returns everything due in O(log N); the Lua script reads and deletes in one atomic step so exactly one scheduler gets each task"),
+            (3, "enqueue", "Optional jitter (0-300 s) smooths midnight / top-of-hour cron spikes for non-strict tasks"),
+            (4, "consume", "Workers round-robin across tenant queues for fair share")]},
+ {"name": "RELIABILITY  ·  at-least-once + idempotent", "color": "#d93025",
+  "nodes": [("Worker claims\nmessage", "run", "compute", "visibility timeout starts"),
+            ("OCC update", "shield", "security", "UPDATE status=RUNNING,\nversion+1 WHERE version=v"),
+            ("Execute + heartbeat", "bolt", "compute", "extend invisibility while\nrunning"),
+            ("Idempotency key", "key", "security", "taskId + run time sent to\nthe webhook target"),
+            ("ACK + COMPLETE", "registry", "dev", "delete message, update Postgres,\nflush logs async to Cassandra")],
+  "edges": [(0, "claim", "A crashed worker's message simply reappears after the timeout"),
+            (1, "won?", "A second worker's update fails because the version changed, so it discards the duplicate"),
+            (2, "call out", "Downstream systems must dedupe using the key because exactly-once delivery is impossible over a network"),
+            (3, "done", "Only now is the message hard-deleted")]},
+]
+build(os.path.join(os.path.dirname(__file__), "architecture.svg"), "Design a distributed task scheduler",
+      "Postgres source of truth · Redis sorted-set timer · queue + visibility timeout · OCC and idempotency keys", lanes,
+      notes=["Scale: 10k+ submissions/s, bursts of 50k executions/s, 99.99% availability, start within 200 ms of schedule time, no acknowledged task lost",
+             "Polyglot persistence: Postgres (state, row locks), Redis (timer), Kafka/RabbitMQ (durable execution queue), Cassandra (execution logs/history)",
+             "Scaling storage: shard Postgres by tenant (10 nodes ≈ 1k TPS each), partition task tables by week/month, bucket Redis ZSETs by minute across a cluster"])

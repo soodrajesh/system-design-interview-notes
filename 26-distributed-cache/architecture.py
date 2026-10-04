@@ -1,0 +1,41 @@
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+from lanes import build
+
+lanes = [
+ {"name": "REQUEST ROUTING  ·  smart client, no proxy hop", "color": "#1a73e8",
+  "nodes": [("App server", "run", "compute", "L1 in-process cache\n(~5 s TTL) for hot keys"),
+            ("Cache client SDK", "policy", "network", "holds cluster topology /\nhash ring; picks the node"),
+            ("Consistent-hash ring", "globe", "network", "~100s of virtual nodes per\nphysical node; clockwise owner"),
+            ("Master node", "db", "data", "single-threaded event loop on a\nhash table + doubly linked list (LRU)"),
+            ("Replica node(s)", "db", "data", "async copy; can serve reads")],
+  "edges": [(0, "get/set/del", "Application asks its SDK; on an L1 hit the cache cluster is never touched"),
+            (1, "hash(key)", "SDK hashes the key (murmur/SHA) onto a 32-bit ring"),
+            (2, "owner", "Walk clockwise to the first node; if a node dies only its keys move to the next node"),
+            (3, "async stream", "Master replies success immediately and streams the write to replicas in the background")]},
+ {"name": "INSIDE A NODE  ·  sub-millisecond, lock-free", "color": "#F29900",
+  "nodes": [("Thousands of\nsockets", "user", "actor", "client connections"),
+            ("I/O multiplexer", "filter", "network", "epoll / kqueue: one thread\nwatches all sockets"),
+            ("Event queue", "bolt", "ops", "only sockets with ready data"),
+            ("Single-threaded\nevent loop", "chart", "compute", "parse → execute → reply,\nstrictly sequential, no locks"),
+            ("Hash table +\nlinked list", "db", "data", "O(1) lookup; move to head on use;\nevict tail when memory is full")],
+  "edges": [(0, "data ready", "Idle connections cost nothing"),
+            (1, "ready events", "Avoids 10,000 threads and context switching"),
+            (2, "dequeue", "Because only one command runs at a time there is no race and no mutex overhead"),
+            (3, "O(1) ops", "Key C at the tail is unlinked and removed from the map in constant time")]},
+ {"name": "AVAILABILITY + HOT KEYS", "color": "#d93025",
+  "nodes": [("Gossip protocol", "bolt", "ops", "every node pings a few peers/s;\nno central monitor"),
+            ("Failure detected", "shield", "security", "peers agree a master is down"),
+            ("Replica promoted", "key", "security", "automatic failover"),
+            ("Key salting", "policy", "network", "tweet:123:1 … :n spreads one\nhot key over n nodes"),
+            ("Read replicas", "db", "data", "scale read throughput by\nadding replicas")],
+  "edges": [(0, "heartbeat", "Decentralised failure detection"),
+            (1, "consensus", "Healthy nodes quickly share the failure"),
+            (2, "hot key", "A celebrity key overloads one shard regardless of cluster size"),
+            (3, "read path", "Client picks a random suffix on read, or reads from replicas")]},
+]
+build(os.path.join(os.path.dirname(__file__), "architecture.svg"), "Design a distributed cache (Redis / Memcached)",
+      "Consistent hashing with virtual nodes · single-threaded event loop · master/replica · gossip · hot-key salting", lanes,
+      notes=["NFRs: sub-millisecond latency, tens of millions of requests/s, terabytes of data, AP over CP (node failures must not take down the cluster), minimal loss on topology change",
+             "Modulo hashing remaps most keys when N changes (3→2 nodes moved 4 of 5 keys in the example) and causes a cache-miss storm that can take down the database; consistent hashing moves only the lost node's keys",
+             "Also: cache-aside vs write-through, RDB/AOF persistence, thundering herd (jittered TTLs, probabilistic early refresh)"])

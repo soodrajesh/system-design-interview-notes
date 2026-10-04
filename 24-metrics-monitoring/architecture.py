@@ -1,0 +1,43 @@
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+from lanes import build
+
+lanes = [
+ {"name": "INGEST + STORE  ·  10M+ points/s, 99.99% write availability", "color": "#1a73e8",
+  "nodes": [("Agents", "user", "actor", "push metric batches\n(name, tags, points)"),
+            ("LB + gateway", "lb", "network", "TLS · routing"),
+            ("Ingestion service", "run", "compute", "validate · tenant quota and\ncardinality check in Redis"),
+            ("Kafka", "bolt", "compute", "durable buffer; keyed by\nhash(tenant, metric)"),
+            ("TSDB writers", "pipeline", "compute", "batch + Gorilla-style compression"),
+            ("Time-series DB", "db", "data", "Cassandra/HBase-style LSM\n(memtable → immutable SSTables)")],
+  "edges": [(0, "POST /v1/series", "Lightweight agents push batches of timestamped values with tags"),
+            (1, "", "Entry point"),
+            (2, "within quota?", "Unique-series counter per tenant stops cardinality explosions; over-limit tenants get 429"),
+            (3, "buffer", "Kafka absorbs spikes and decouples ingestion from DB writes and from alerting"),
+            (4, "compressed chunks", "Delta-of-delta timestamps and XOR-encoded values shrink data ~10x+; chunks flush sequentially (no random disk IO)")]},
+ {"name": "ALERTING  ·  rules come to the data stream", "color": "#d93025",
+  "nodes": [("Postgres", "db", "data", "alert rules, dashboards,\norgs (metadata)"),
+            ("CDC", "bolt", "compute", "change data capture →\nKafka rules topic"),
+            ("Flink alert engine", "chart", "compute", "rules broadcast to every worker's\nmemory; sliding windows;\nwatermarks for late data"),
+            ("Notification svc", "run", "compute", "dedupe via Redis alert state"),
+            ("PagerDuty / Slack\n/ email", "globe", "network", "single page per incident")],
+  "edges": [(0, "rule saved", "Users define rules via a metadata CRUD service"),
+            (1, "broadcast", "Flink never polls Postgres: rule changes are pushed into its memory"),
+            (2, "threshold breached", "Evaluates the raw Kafka stream directly, bypassing the TSDB; alerts in seconds"),
+            (3, "dispatch", "If state is already firing, suppress; avoids paging on-call 100 times")]},
+ {"name": "QUERY + RETENTION", "color": "#00897b",
+  "nodes": [("Dashboard UI", "user", "actor", "PromQL-style query"),
+            ("Query engine", "run", "compute", "router by time range"),
+            ("Raw TSDB", "db", "data", "10 s resolution, 7 days"),
+            ("Spark rollups", "pipeline", "compute", "min/max/sum/avg → 1 min (30 d)\n→ 1 hour (1 yr)"),
+            ("Object storage\n(S3)", "bucket", "data", "cold, downsampled history")],
+  "edges": [(0, "GET /v1/query", "Query expression plus start and end time"),
+            (1, "recent range", "Last 24 h comes from the TSDB"),
+            (2, "downsample", "Background jobs roll data up and delete raw data after 7 days"),
+            (3, "archive", "A 6-month chart is rewritten to hit the hourly rollups, so a few thousand points rather than millions")]},
+]
+build(os.path.join(os.path.dirname(__file__), "architecture.svg"), "Design a metrics monitoring and alerting system",
+      "Datadog / Prometheus style · Kafka buffer · Gorilla compression · Flink alerting · tiered rollups", lanes,
+      notes=["Scale: 10M+ data points/s, sub-second dashboard queries over days, alerts within seconds, extreme storage efficiency",
+             "Cardinality: a series = metric name + tag combination; a bad tag like user_id creates billions of series. Quota per tenant (e.g. 100k active series) and a 429 circuit breaker",
+             "Sharding: Kafka and TSDB sharded by hash(tenant id, metric name) so one metric lands on one node and aggregation stays local"])
