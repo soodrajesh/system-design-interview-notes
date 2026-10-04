@@ -1,6 +1,6 @@
 # System design interview notes
 
-Notes and architecture diagrams from system design interview material: the [IGotAnOffer: Engineering](https://www.youtube.com/@IGotAnOffer-Engineering/videos) YouTube channel (entries 01-16) and [Hello Interview](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly) written breakdowns (entries 17-22). See [ROADMAP.md](ROADMAP.md) for what is planned next. Each folder covers one video or article: a README with scope, estimates, API/data model, components and the reasoning given for them, deep dives, and what the coach said about interview technique, plus an architecture diagram (`architecture.png`, source in `architecture.py`).
+Notes and architecture diagrams from system design interview material: the [IGotAnOffer: Engineering](https://www.youtube.com/@IGotAnOffer-Engineering/videos) YouTube channel (entries 01-16) [Hello Interview](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly) written breakdowns (entries 17-22), and [TechPrep](https://www.youtube.com/@TechPrepYT) videos (entries 23-26). See [ROADMAP.md](ROADMAP.md) for what is planned next. Each folder covers one video or article: a README with scope, estimates, API/data model, components and the reasoning given for them, deep dives, and what the coach said about interview technique, plus an architecture diagram (`architecture.png`, source in `architecture.py`).
 
 These are my own summaries written from the video transcripts. All credit for the designs and commentary goes to the interviewees and IGotAnOffer; follow the links to watch the originals. This repository is not affiliated with IGotAnOffer.
 
@@ -27,6 +27,10 @@ These are my own summaries written from the video transcripts. All credit for th
 | 19 | [Ticketmaster](19-ticketmaster/) | Hello Interview | Redis TTL seat locks, no double booking, Elasticsearch via CDC, virtual waiting room |
 | 20 | [Web crawler](20-web-crawler/) | Hello Interview | pipelined stages, SQS backoff + DLQ, politeness, DNS, content dedup, crawler traps |
 | 21 | [Ad click aggregator](21-ad-click-aggregator/) | Hello Interview | Flink stream aggregation, signed impression ids, hot-shard salting, Lambda-style reconciliation |
+| 23 | [Distributed task scheduler](23-job-scheduler/) | TechPrep | Redis sorted-set timer, tenant queues, visibility timeouts, OCC + idempotency keys |
+| 24 | [Metrics monitoring and alerting](24-metrics-monitoring/) | TechPrep | Gorilla compression, Flink alert rules via CDC, tiered rollups, cardinality limits |
+| 25 | [Digital wallet (Cash App)](25-digital-wallet/) | TechPrep | double-entry ledger, sorted-lock deadlock avoidance, saga + transactional outbox, reconciliation |
+| 26 | [Distributed cache (Redis)](26-distributed-cache/) | TechPrep | consistent hashing with virtual nodes, event loop + epoll, gossip failover, key salting |
 
 ## Interview technique videos
 
@@ -49,7 +53,7 @@ These are my own summaries written from the video transcripts. All credit for th
 
 ## Notes on accuracy
 
-Entries 17-21 summarise Hello Interview's written articles (not their videos) and credit them as the source. Where a spoken calculation in a video was inconsistent, the README states the corrected figure and says so (for example the Instagram storage estimate, the Twitter storage estimate, the recommendation-system event rate, and the phone-billing monthly call count). Architectures are as described in each video, not how the real companies build these systems.
+Entries 17-21 summarise Hello Interview's written articles (not their videos) and credit them as the source; entries 23-26 come from TechPrep video transcripts. Where Hello Interview's page for a topic is Premium-only, only the public outline is cited. Where a spoken calculation in a video was inconsistent, the README states the corrected figure and says so (for example the Instagram storage estimate, the Twitter storage estimate, the recommendation-system event rate, and the phone-billing monthly call count). Architectures are as described in each video, not how the real companies build these systems.
 
 ## Regenerating the diagrams
 
