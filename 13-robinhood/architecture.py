@@ -1,0 +1,41 @@
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+from lanes import build
+
+lanes = [
+ {"name": "PRICE PIPELINE  ·  the hard part (exchange → phone)", "color": "#1a73e8",
+  "nodes": [("Exchanges 1..N", "globe", "network", "UDP order-book feeds\n(16-17 for options)"),
+            ("Exchange layer\npublishers", "chart", "compute", "sharded by ticker · stateful\nNBBO = (best bid + best ask)/2"),
+            ("Routing /\ncommunication layer", "db", "ops", "Redis · latest price per ticker\nsharded + 3x replicated"),
+            ("User layer\nservers", "run", "compute", "WebSocket servers\nround-robin balanced"),
+            ("Phone app", "user", "actor", "one connection;\nheartbeats")],
+  "edges": [(0, "feeds", "Every exchange publishes an order book (bids and offers), not a single price"),
+            (1, "price(ticker)", "Publisher for a ticker aggregates all exchanges into the national best bid/offer and a single mid price"),
+            (2, "push / subscribe", "Redis keeps only the most recent value, decoupling publishers from millions of consumers (SSE or long-poll to user servers)"),
+            (3, "WebSocket", "Phone holds one bidirectional WebSocket to a single user-layer server through a load balancer")]},
+ {"name": "FAULT TOLERANCE FOR PUBLISHERS", "color": "#d93025",
+  "nodes": [("Exchanges", "globe", "network", "same UDP feed"),
+            ("Primary publisher\n(e.g. Tesla)", "chart", "compute", "stateful"),
+            ("Secondary\npublisher", "chart", "compute", "listens to the same feed\n(state machine replication)"),
+            ("ZooKeeper", "key", "security", "partition map · liveness\nfailover decision"),
+            ("Routing layer", "db", "ops", "switches to the backup")],
+  "edges": [(0, "feed", "Both primary and backup consume the exchange feed independently, so the backup is already warm"),
+            (1, "heartbeat", "Primary sends updates / heartbeats to the routing layer"),
+            (2, "monitor", "If heartbeats stop, the coordination service confirms the primary is down"),
+            (3, "switch", "Routing layer cuts over to the secondary with no cold start")]},
+ {"name": "ORDERS + POSITIONS  ·  trivial by comparison", "color": "#00897b",
+  "nodes": [("Phone app", "user", "actor", "place order · view positions"),
+            ("Load balancer", "lb", "network", "consistent hashing\n(per-user cache hits)"),
+            ("Orders & positions\nservice", "run", "compute", "forward order to exchange API"),
+            ("Exchange API", "globe", "network", "order flow"),
+            ("MySQL", "db", "data", "sharded by user id\npositions(user, stock, meta)")],
+  "edges": [(0, "request", "User places an order or asks for holdings"),
+            (1, "same user → same node", "Consistent hashing keeps one user's queries on the same server so results stay cached"),
+            (2, "send order", "Order forwarded to the exchange API"),
+            (3, "on success", "Position row written to the sharded MySQL after a successful response")]},
+]
+build(os.path.join(os.path.dirname(__file__), "architecture.svg"), "Design a stock trading app (Robinhood)",
+      "Real-time price distribution · three independently scalable layers · NBBO aggregation · WebSockets", lanes,
+      notes=["Scale: 100M users × 100 stocks = 10B positions. Focus = showing the correct, current price cheaply",
+             "Concerns: few client connections (battery/data), few paid exchange connections, each layer scales on its own",
+             "Layers: user layer (large) / routing layer (Redis) / exchange layer (small, ticker-sharded)"])

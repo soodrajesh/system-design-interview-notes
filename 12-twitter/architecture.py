@@ -1,0 +1,43 @@
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+from lanes import build
+
+lanes = [
+ {"name": "POST A TWEET  ·  synchronous part", "color": "#1a73e8",
+  "nodes": [("Client", "user", "actor", "POST /v1/tweets"),
+            ("API gateway +\nLB", "lb", "network", "auth · rate limit"),
+            ("Tweet processor", "run", "compute", "validate · assign id"),
+            ("Asset service", "bucket", "data", "media → object store\n+ CDN, returns media id"),
+            ("Tweet store", "db", "data", "Cassandra wide rows\nsorted by time + Redis cache"),
+            ("Kafka", "bolt", "compute", "partitioned by tweet id")],
+  "edges": [(0, "tweet", "Client posts text and optional media (media goes via a separate endpoint; only a link is stored in the tweet)"),
+            (1, "", "Gateway and load balancers (deferred in the interview) front the service"),
+            (2, "media?", "Processor stores media through the asset service and gets back a media id (URLs may go to a URL shortener)"),
+            (3, "write", "Tweet row written to Cassandra (and cache); 200 OK returned as soon as the DB write succeeds"),
+            (4, "publish", "Event published to Kafka for async processing; cache-write failures are handled internally, not blocking the user")]},
+ {"name": "FAN-OUT  ·  asynchronous, eventually consistent (10-60 s)", "color": "#F29900",
+  "nodes": [("Kafka", "bolt", "compute", "tweet events"),
+            ("Fan-out consumers", "pipeline", "compute", "look up followers,\nemit (author, follower, tweet id)"),
+            ("Redis channels", "bolt", "ops", "one per follower"),
+            ("Timeline writers", "run", "compute", "listen to channels"),
+            ("Redis timelines", "db", "data", "user → linked list\n~500 tweets · O(1) push/trim")],
+  "edges": [(0, "consume", "Kafka is the hub: search indexing, analytics and timeline generation all consume the same stream"),
+            (1, "per-follower tuples", "Consumers read the author's followers from the user graph and create one tuple per follower"),
+            (2, "subscribe", "Tuples flow to per-user Redis channels (queue-like pub/sub)"),
+            (3, "push", "Writers insert the tweet id at the head of each follower's timeline list in memory")]},
+ {"name": "READ HOME TIMELINE + FOLLOW", "color": "#00897b",
+  "nodes": [("Client", "user", "actor", "GET /v1/timelines/home"),
+            ("Timeline service", "run", "compute", "page / page size"),
+            ("Redis timelines", "db", "data", "pre-built (fast path)"),
+            ("Tweet service", "run", "compute", "fallback + celebrity tweets"),
+            ("User graph", "db", "data", "key-value · followers /\nfollowees (separate tables)")],
+  "edges": [(0, "read", "Home timeline = followees' tweets (+ own + ads); user timeline = own tweets"),
+            (1, "hit", "Fast path: read the pre-generated list from Redis"),
+            (2, "miss / inactive user", "Inactive users have no cached timeline: look up followees, fetch their tweets and build it on demand"),
+            (3, "followees", "User graph is the source of truth for POST/DELETE /v1/users/{id}/follow; popular users are merged in at read time")]},
+]
+build(os.path.join(os.path.dirname(__file__), "architecture.svg"), "Design Twitter",
+      "Post a tweet · home/user timeline · follow · Kafka fan-out into Redis timelines · Cassandra wide rows", lanes,
+      notes=["Scale: 1B users, 100M tweets/day ≈ 1.2k writes/s (6-12k at peak); 20 followers avg → ~100k fan-out messages/s; reads:writes ≈ 10-20:1",
+             "Storage: 100M tweets × ~200 KB incl. media ≈ 20 TB/day (the video said 10 TB, an arithmetic slip); text alone ≤ ~560 B (280 chars)",
+             "Hot users: skip fan-out above ~10-50k followers and pull their tweets on read. IDs: 64-bit Snowflake-style (41-bit time, 10-bit worker, 12-bit sequence)"])

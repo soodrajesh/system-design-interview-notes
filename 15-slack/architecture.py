@@ -1,0 +1,43 @@
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+from lanes import build
+
+lanes = [
+ {"name": "SEND + FAN-OUT  ·  ordered per chat (final design)", "color": "#1a73e8",
+  "nodes": [("Sender client", "user", "actor", "WebSocket: send_message"),
+            ("API gateway / LB", "lb", "network", "authN/Z · rate limit\nTLS · protocol translation"),
+            ("Chat server", "run", "compute", "validate · UUID message id\nclassify text vs media"),
+            ("Kafka", "bolt", "compute", "partition = chat id\n(per-chat ordering)"),
+            ("Message DB", "db", "data", "NoSQL (key-value), sharded\nby chat id · messages, chats,\nmembers · inbox by user id"),
+            ("Fan-out jobs", "pipeline", "compute", "triggered by CDC on\nmessage table")],
+  "edges": [(0, "send", "Client sends a send_message event (chat id, content, media id) over its persistent WebSocket"),
+            (1, "", "Gateway acts as load balancer plus auth, rate limiting, TLS"),
+            (2, "produce", "Chat server validates, assigns a globally unique message id and timestamp, and publishes keyed by chat id"),
+            (3, "consume", "Per-chat partition guarantees order; Kafka also buffers if consumers fail"),
+            (4, "CDC", "Change data capture on the message table triggers the fan-out jobs, so the chat server is not the bottleneck")]},
+ {"name": "DELIVERY  ·  online vs offline users", "color": "#00897b",
+  "nodes": [("Fan-out jobs", "pipeline", "compute", "chat members from cache"),
+            ("Session lookup", "bolt", "ops", "Redis: chat → connected\nWebSocket servers (TTL lease)"),
+            ("Redis pub/sub", "bolt", "ops", "channel per chat id"),
+            ("WebSocket servers", "run", "compute", "subscribed to channels of\ntheir connected users"),
+            ("Recipient devices", "user", "actor", "new_message; dedupe by\nlast message id")],
+  "edges": [(0, "who's online?", "Fan-out resolves members of the chat and their active sessions"),
+            (1, "publish", "Online users: publish to the chat channel (not broadcast to all servers)"),
+            (2, "subscribe", "Only WebSocket servers holding a member's connection receive the event"),
+            (3, "push", "Server pushes new_message down the socket; the same applies to message_deleted, typing, read receipts, presence")]},
+ {"name": "OFFLINE USERS + MEDIA + DELETE", "color": "#F29900",
+  "nodes": [("Fan-out jobs", "pipeline", "compute", "offline members"),
+            ("Inbox table", "db", "data", "user id · message id ·\ncreated_at · delivered_at ·\nis_deleted"),
+            ("Push service", "bolt", "compute", "APNS / FCM: 'new message'\n(no content)"),
+            ("User reconnects", "user", "actor", "WebSocket server reads\npending inbox"),
+            ("Media path", "bucket", "data", "pre-signed URL → S3;\nmessage stores media id + URL")],
+  "edges": [(0, "insert", "Offline users get an inbox row instead of a live push"),
+            (1, "notify", "A push notification (not the message) tells them to come back"),
+            (2, "come online", "On reconnect, pending inbox rows are pushed (skipping deleted ones) and delivered_at is stamped"),
+            (3, "separate store", "Media bytes never pass through the chat server: client uploads to S3 via a pre-signed URL from the media server, then sends only the media id")]},
+]
+build(os.path.join(os.path.dirname(__file__), "architecture.svg"), "Design Slack",
+      "Group + 1:1 chat · rich media · offline notifications · delete propagation · WebSockets, Kafka, Redis pub/sub", lanes,
+      notes=["Scale: 1B users (daily active), ~100k concurrent chats, ~12k QPS; latency target 200 ms (batch beyond 500 ms); CAP: availability > consistency",
+             "Entities: user, chat, chat_member, message (id, chat id, sender, content, parent id), media, device_session. Polyglot persistence: S3 for media, NoSQL for messages",
+             "Deep dives: ordering (Kafka by chat id), WebSocket scale (Redis pub/sub), WebSocket churn (TTL leases ~10 s), storage (partition + read replicas + cache of members/sessions)"])

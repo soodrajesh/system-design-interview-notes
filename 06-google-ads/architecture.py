@@ -1,0 +1,43 @@
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+from lanes import build
+
+lanes = [
+ {"name": "AD CREATION  ·  seller", "color": "#1a73e8",
+  "nodes": [("Seller", "user", "actor", "submits ad product"),
+            ("API gateway", "lb", "network", "rate limit · authN/Z\nload balancing"),
+            ("Ad service", "run", "compute", "pre-signed URL +\npayload"),
+            ("Kafka\nad-creation", "bolt", "compute", "async validation:\ndup · trust & safety"),
+            ("Ad processor", "run", "compute", "initial score =\ncurrent max for type"),
+            ("DynamoDB", "db", "data", "ads table (sharded)\nGSI: type + score")],
+  "edges": [(0, "submit ad", "Seller uploads a thumbnail straight to S3 via a pre-signed URL, then sends the ad payload"),
+            (1, "", "Gateway applies DoS protection, authentication, authorization"),
+            (2, "publish", "Ad service enqueues the ad so the seller gets a fast ack"),
+            (3, "consume", "Consumer runs duplicate / compliance checks"),
+            (4, "write", "New ad gets a default score above the current maximum for its product type, so new sellers are not starved")]},
+ {"name": "CLICK PATH  ·  feedback loop (score SLO 3 min p99)", "color": "#F29900",
+  "nodes": [("User", "user", "actor", "clicks sponsored ad"),
+            ("Click service", "run", "compute", "partition key = ad id"),
+            ("Kafka\nclicks topic", "bolt", "compute", "10 partitions"),
+            ("Click processors\n×5", "run", "compute", "2 partitions each\nbatch 10k / 30 s"),
+            ("DynamoDB", "db", "data", "score += Σ clicks\nif offset > stored offset")],
+  "edges": [(0, "click", "Click goes through the gateway to the click service (peak ~100k clicks/s)"),
+            (1, "keyed by ad id", "Events keyed by ad id so one ad's clicks stay ordered within a partition"),
+            (2, "consume in parallel", "Consumer instances each own a pair of partitions: parallel but ordered per ad"),
+            (3, "batch update", "Aggregate scores in memory, make one batched DB call, then commit the Kafka offset. Stored message_offset makes replays idempotent")]},
+ {"name": "SEARCH PATH  ·  ads render p99 < 200 ms", "color": "#00897b",
+  "nodes": [("DynamoDB", "db", "data", "stream (DDB Streams)"),
+            ("Serverless fn", "bolt", "compute", "Lambda · refresh top-N"),
+            ("Redis", "db", "data", "sorted set per product\ntype · top 25 · ~2.5 GB"),
+            ("Search service", "run", "compute", "+ context ML service"),
+            ("User", "user", "actor", "sees sponsored ads")],
+  "edges": [(0, "change event", "Any new ad or score change triggers the function"),
+            (1, "ZADD / trim", "Function maintains each product type's top-N sorted set in Redis"),
+            (2, "top-N", "Search resolves the query (e.g. 'gifts for a 10 year old' → toy, comic book) via a context ML service, reads the sorted sets and merges in memory"),
+            (3, "render", "Cache miss falls back to the DynamoDB index (product type, sorted by score)")]},
+]
+build(os.path.join(os.path.dirname(__file__), "architecture.svg"), "Design sponsored ads (google.com)",
+      "Ad ingestion · click-score feedback loop · Redis top-N cache · idempotent Kafka consumers", lanes,
+      notes=["Scale: 10M DAU × 10 searches ≈ 1k QPS (100k peak); 10 clicks/user → 100k/s peak; 100k advertisers × 10 ads/day → 10/s (1k peak)",
+             "Storage: 100k × 10 × 500 B × 365 × 3 replicas × 10 yrs ≈ 5.5 TB: no need to shard for size, but 100k writes/s peak means shard for throughput",
+             "IO-bound, not compute-bound; 4 nines target, eventual consistency; durability: no lost clicks or ads"])
