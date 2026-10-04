@@ -1,0 +1,43 @@
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+from lanes import build
+
+lanes = [
+ {"name": "CRAWL PIPELINE  ·  stages isolated so a failure never loses progress", "color": "#1a73e8",
+  "nodes": [("Seed URLs", "globe", "network", "provided up front"),
+            ("Frontier queue", "bolt", "compute", "SQS · message = URL id\n(not the HTML)"),
+            ("URL fetchers\n(~8 big instances)", "run", "compute", "DNS cache · robots check ·\ndomain lock · fetch"),
+            ("Raw HTML\n(S3)", "bucket", "data", "kept so parsing can be re-run"),
+            ("Parse queue →\nparser workers", "pipeline", "compute", "autoscale on queue depth\n(Lambda / Fargate)"),
+            ("Text (S3) +\nMetadata DB", "db", "data", "DynamoDB: url, depth, hashes,\nblob links, domain state")],
+  "edges": [(0, "enqueue", "Seed URLs are the initial input; usually supplied by the interviewer"),
+            (1, "dequeue", "Fetchers pull a URL id; the message stays in the queue until the HTML is safely stored"),
+            (2, "store", "Raw HTML goes to blob storage; only an id travels on queues"),
+            (3, "notify", "A second queue triggers parsing"),
+            (4, "text + links", "Extract text for the LLM corpus; discovered links are de-duplicated and pushed back to the frontier")]},
+ {"name": "POLITENESS + RETRY", "color": "#00897b",
+  "nodes": [("Dequeued URL", "pipeline", "compute", "domain known"),
+            ("robots.txt rules", "policy", "security", "fetched once per domain,\nstored in Metadata DB"),
+            ("Per-domain lock", "key", "security", "Redis SET NX EX = crawl-delay;\n~1 request/s per domain, + jitter"),
+            ("Fetch", "run", "compute", "disallowed → ack and skip;\ntoo soon → defer"),
+            ("Retry / DLQ", "bolt", "ops", "SQS visibility timeout with\nexponential backoff; DLQ after 5")],
+  "edges": [(0, "check", "Look up the domain's rules"),
+            (1, "allowed?", "A disallowed path is acked and dropped; otherwise check pacing"),
+            (2, "acquired?", "If the lock is held (someone crawled recently), push the message back with ChangeMessageVisibility"),
+            (3, "failure", "Failed fetches reappear after a growing delay; after 5 attempts the site is treated as offline")]},
+ {"name": "EFFICIENCY  ·  de-duplication and traps", "color": "#F29900",
+  "nodes": [("New link", "globe", "network", "from a parsed page"),
+            ("URL dedup", "filter", "compute", "URL already in Metadata DB?\nskip"),
+            ("Depth check", "chart", "ops", "hops from seed ≤ 15-20\n(crawler-trap guard)"),
+            ("Fetch + hash", "run", "compute", "hash page content"),
+            ("Content dedup", "filter", "compute", "indexed hash column, or a\nRedis Bloom filter")],
+  "edges": [(0, "canonicalise", "Normalise the URL then check the URL table"),
+            (1, "depth+1", "Each followed link increments depth; beyond the limit the branch is dropped"),
+            (2, "page", "Fetch, then hash the content (different URLs can serve identical content)"),
+            (3, "seen?", "If the hash already exists skip parsing. The article prefers a simple DB index over a Bloom filter")]},
+]
+build(os.path.join(os.path.dirname(__file__), "architecture.svg"), "Design a web crawler",
+      "LLM-training crawl of 10B pages in < 5 days · SQS pipeline · politeness · DNS · dedup", lanes,
+      notes=["Scale: 10B pages × ~2 MB (worst-case transfer) in 5 days; one 200 Gbps instance ≈ 12.5k pages/s theoretical, ~30% usable = 3,750/s → ~31 days alone → 8 machines ≈ 3.9 days",
+             "Per-domain limit is ~1 req/s but millions of domains are crawled in parallel, so aggregate throughput is high. DNS can dominate time: cache lookups, use several DNS providers",
+             "Extras: headless browser for JS pages, HEAD request to skip huge files, URL scheduler for recrawls, priority queues"])
