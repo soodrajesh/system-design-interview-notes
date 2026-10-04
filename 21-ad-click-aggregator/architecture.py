@@ -1,0 +1,41 @@
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+from lanes import build
+
+lanes = [
+ {"name": "CLICK INGEST  ·  10k clicks/s peak, idempotent, never lose data", "color": "#1a73e8",
+  "nodes": [("Browser", "user", "actor", "ad rendered with signed\nimpression id"),
+            ("Ad placement\nservice", "run", "compute", "black box: creates impression id,\nHMAC(impression id + ad id)"),
+            ("Click processor", "run", "compute", "verify HMAC → dedup in Redis\n→ 302 redirect to advertiser"),
+            ("Kafka / Kinesis", "bolt", "compute", "keyed by AdId (+ random suffix\nfor hot ads); 7-day retention"),
+            ("Flink", "pipeline", "compute", "1-minute event-time windows,\nwatermarks, flush every few s"),
+            ("OLAP DB", "db", "data", "Snowflake/BigQuery/ClickHouse:\n(ad, minute) → unique clicks")],
+  "edges": [(0, "click", "Click carries the signed impression id (one per ad display, so retargeting still counts)"),
+            (1, "", "Server-side redirect (302) means every click is seen before the user leaves"),
+            (2, "write first", "Write the click to the stream first, then record the impression id in the cache, so a cache failure can't lose a click"),
+            (3, "consume", "Per-shard Flink jobs aggregate each ad's events in parallel"),
+            (4, "upsert", "Aggregates are upserted with SUM, so partial writes from sub-partitions combine correctly")]},
+ {"name": "CORRECTNESS  ·  speed layer + batch layer (Lambda architecture)", "color": "#00897b",
+  "nodes": [("Kafka / Kinesis", "bolt", "compute", "raw click stream"),
+            ("Data lake (S3)", "bucket", "data", "Kafka Connect S3 sink /\nKinesis Firehose"),
+            ("Spark batch", "pipeline", "compute", "hourly / daily full re-aggregation"),
+            ("Reconcile", "shield", "security", "compare with stream result;\ninvestigate drift"),
+            ("OLAP DB", "db", "data", "corrected values written back")],
+  "edges": [(0, "archive", "Raw events are continuously archived without loading Flink"),
+            (1, "read", "A periodic batch job recomputes the truth from raw data"),
+            (2, "diff", "Detects bad deploys, late/out-of-order data, transient Flink errors"),
+            (3, "fix", "Batch layer is the source of truth for corrections")]},
+ {"name": "QUERY", "color": "#F29900",
+  "nodes": [("Advertiser", "user", "actor", "metrics ≥ 1-minute granularity"),
+            ("Query API", "lb", "network", "sub-second"),
+            ("OLAP DB", "db", "data", "columnar; sharded by advertiser id\n(self-managed) so one advertiser's ads co-locate"),
+            ("Rollup tables", "chart", "ops", "nightly hourly/daily/weekly\npre-aggregates for long ranges")],
+  "edges": [(0, "query", "Advertiser asks for clicks per ad over time"),
+            (1, "read", "Data is already aggregated, so queries are fast"),
+            (2, "long range?", "Large windows hit the pre-aggregated tables; drill down to minutes only when needed")]},
+]
+build(os.path.join(os.path.dirname(__file__), "architecture.svg"), "Design an ad click aggregator",
+      "Stream processing (Flink) into an OLAP store · idempotent clicks via signed impression ids · batch reconciliation", lanes,
+      notes=["Scale: 10M active ads, peak 10k clicks/s (average ≈ 1k/s ≈ 100M clicks/day); a 5-minute batch is only ~3M events / 300 MB, so Spark isn't needed for volume",
+             "Why not one DB for events and queries: GROUP BY over raw rows won't give sub-second answers. Why OLAP, not time-series DB: millions of ad ids and multi-dimensional slices",
+             "Hot shards: for a viral ad, key = AdId:0..N so one shard isn't overwhelmed; Flink strips the suffix before writing"])

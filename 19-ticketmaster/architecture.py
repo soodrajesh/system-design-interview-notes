@@ -1,0 +1,43 @@
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+from lanes import build
+
+lanes = [
+ {"name": "VIEW + SEARCH  ·  read-heavy (100:1), availability first", "color": "#1a73e8",
+  "nodes": [("Client", "user", "actor", "event page · search"),
+            ("API gateway", "lb", "network", "auth · rate limit"),
+            ("Event / Search\nservice", "run", "compute", "stateless, scaled out"),
+            ("Redis cache", "bolt", "ops", "eventId → event; search\nresults keyed by all params"),
+            ("Postgres", "db", "data", "events · venues · performers\n· tickets · bookings"),
+            ("Elasticsearch", "db", "data", "inverted index, fuzzy search;\nkept in sync by CDC")],
+  "edges": [(0, "GET /events/:id, /search", "Viewing and search endpoints are separate from booking"),
+            (1, "", "Gateway routes to the read services"),
+            (2, "read-through", "Hot event data is cached aggressively; TTLs long for venue info, short for availability"),
+            (3, "miss", "Event details come from Postgres"),
+            (4, "CDC", "Search queries go to Elasticsearch instead of LIKE '%…%' scans (Postgres full-text is the cheaper intermediate step)")]},
+ {"name": "BOOK  ·  consistency first, no double booking", "color": "#d93025",
+  "nodes": [("Client", "user", "actor", "pick a seat"),
+            ("Booking service", "run", "compute", "POST /bookings"),
+            ("Redis lock", "key", "security", "SET ticketId userId NX EX 600\nauto-expires; sorted set drives\nseat map greying"),
+            ("Postgres", "db", "data", "booking = in-progress;\nticket sold only on confirm (OCC)"),
+            ("Stripe", "money", "ops", "tokenised card, PaymentIntent,\nwebhook"),
+            ("Webhook handler", "bolt", "compute", "idempotent: tx marks ticket\nsold + booking confirmed")],
+  "edges": [(0, "reserve", "User clicks a seat; this starts a timed reservation"),
+            (1, "acquire lock", "Atomic NX lock with a 10-minute TTL; only one user can hold a seat"),
+            (2, "booking row", "A booking in 'in-progress' is written; client is sent to payment"),
+            (3, "pay", "Client tokenises the card with Stripe.js (servers never see card numbers)"),
+            (4, "webhook", "On success, Stripe calls back; use bookingId as idempotency key because webhooks retry. If the lock expired mid-payment and the DB write loses, refund")]},
+ {"name": "SPIKE PROTECTION  ·  'Taylor Swift' on-sale", "color": "#F29900",
+  "nodes": [("Millions of\nfans", "user", "actor", "SSE / WebSocket"),
+            ("Virtual waiting\nqueue", "pipeline", "compute", "Redis sorted set by arrival;\nposition updates pushed"),
+            ("Admission control", "shield", "security", "dequeue at a safe rate →\nadmitted:{event} set with TTL"),
+            ("Booking service", "run", "compute", "rejects anyone not admitted")],
+  "edges": [(0, "join queue", "Before seeing the seat map, users wait in a queue with live position and estimated wait"),
+            (1, "dequeue", "An operator-enabled throttle releases users in batches as tickets sell"),
+            (2, "admit", "Only admitted sessions may call the reservation endpoint")]},
+]
+build(os.path.join(os.path.dirname(__file__), "architecture.svg"), "Design Ticketmaster",
+      "View / search / book events · seat reservation with Redis TTL lock · Elasticsearch · virtual waiting room", lanes,
+      notes=["NFRs: availability for browse/search, consistency for booking (never double book), 10M users on one event, search < 500 ms, reads ≈ 100× writes",
+             "Locking options compared: long DB transaction (bad) → status+expiry+cron (good) → implicit status with expiry in a short transaction (great) → Redis TTL lock (great, chosen)",
+             "Shared DB between services is fine here: bookings, tickets and events are tightly coupled and need ACID transactions"])

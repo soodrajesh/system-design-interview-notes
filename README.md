@@ -1,6 +1,6 @@
 # System design interview notes
 
-Notes and architecture diagrams from the system design videos on the [IGotAnOffer: Engineering](https://www.youtube.com/@IGotAnOffer-Engineering/videos) YouTube channel. Each folder covers one video: a README with scope, estimates, API/data model, components and the reasoning given for them, deep dives, and what the coach said about interview technique, plus an architecture diagram (`architecture.png`, source in `architecture.py`).
+Notes and architecture diagrams from system design interview material: the [IGotAnOffer: Engineering](https://www.youtube.com/@IGotAnOffer-Engineering/videos) YouTube channel (entries 01-16) and [Hello Interview](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly) written breakdowns (entries 17-22). See [ROADMAP.md](ROADMAP.md) for what is planned next. Each folder covers one video or article: a README with scope, estimates, API/data model, components and the reasoning given for them, deep dives, and what the coach said about interview technique, plus an architecture diagram (`architecture.png`, source in `architecture.py`).
 
 These are my own summaries written from the video transcripts. All credit for the designs and commentary goes to the interviewees and IGotAnOffer; follow the links to watch the originals. This repository is not affiliated with IGotAnOffer.
 
@@ -22,6 +22,11 @@ These are my own summaries written from the video transcripts. All credit for th
 | 14 | [YouTube](14-youtube/) | FAANG senior SWE | transcoding pipeline, adaptive bitrate, CDN controller, keyword search |
 | 15 | [Slack](15-slack/) | ex-Apple EM | WebSockets, Kafka ordering by chat id, Redis pub/sub with TTL leases, inbox for offline users |
 | 16 | [Product recommendation system](16-product-recommendation-system/) | ex-Amazon principal engineer | feature store + embeddings + ranker, Kafka/Flink online, Spark offline, A/B testing |
+| 17 | [URL shortener (Bit.ly)](17-url-shortener/) | Hello Interview | counter + base62, 302 vs 301, cache + CDN + edge, disjoint counter ranges |
+| 18 | [Distributed rate limiter](18-rate-limiter/) | Hello Interview | gateway placement, token bucket in Redis with atomic Lua, sharding, fail-open vs fail-closed |
+| 19 | [Ticketmaster](19-ticketmaster/) | Hello Interview | Redis TTL seat locks, no double booking, Elasticsearch via CDC, virtual waiting room |
+| 20 | [Web crawler](20-web-crawler/) | Hello Interview | pipelined stages, SQS backoff + DLQ, politeness, DNS, content dedup, crawler traps |
+| 21 | [Ad click aggregator](21-ad-click-aggregator/) | Hello Interview | Flink stream aggregation, signed impression ids, hot-shard salting, Lambda-style reconciliation |
 
 ## Interview technique videos
 
@@ -29,6 +34,7 @@ These are my own summaries written from the video transcripts. All credit for th
 |---|---|---|
 | 09 | [10 key principles](09-ten-key-principles/) | scope the problem, draw about a third of the way in, working solution before optimising, explain choices, show your maths |
 | 10 | [10 ways to impress](10-signals-interviewers-look-for/) | the communication, judgment and problem-solving signals interviewers score, plus yellow flags |
+| 22 | [Delivery framework and levels](22-delivery-framework-and-levels/) | requirements → entities → API → design → deep dives; breadth vs depth expected at mid, senior and staff |
 
 ## Patterns that recur across the designs
 
@@ -43,7 +49,7 @@ These are my own summaries written from the video transcripts. All credit for th
 
 ## Notes on accuracy
 
-Where a spoken calculation in a video was inconsistent, the README states the corrected figure and says so (for example the Instagram storage estimate, the Twitter storage estimate, the recommendation-system event rate, and the phone-billing monthly call count). Architectures are as described in each video, not how the real companies build these systems.
+Entries 17-21 summarise Hello Interview's written articles (not their videos) and credit them as the source. Where a spoken calculation in a video was inconsistent, the README states the corrected figure and says so (for example the Instagram storage estimate, the Twitter storage estimate, the recommendation-system event rate, and the phone-billing monthly call count). Architectures are as described in each video, not how the real companies build these systems.
 
 ## Regenerating the diagrams
 
@@ -54,4 +60,4 @@ PY=.venv/bin/python tools/build.sh 03-spotify     # writes architecture.svg and 
 
 `tools/lanes.py` lays out each flow as a horizontal lane of service tiles; `tools/archlib.py` is a small dependency-free SVG library; `tools/render.py` renders the SVG to PNG with headless Chrome.
 
-Videos not covered here (behavioural, résumé, salary, leadership, compilation): the channel also has talks on Googleyness, CTO/leadership interviews, résumé review and salary negotiation, which are not system designs.
+Not covered from the IGotAnOffer channel (behavioural, résumé, salary, leadership, compilation): the channel also has talks on Googleyness, CTO/leadership interviews, résumé review and salary negotiation, which are not system designs.
